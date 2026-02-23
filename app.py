@@ -1,11 +1,12 @@
+import os
+
 from flask import Flask, request, jsonify
 import psycopg2
+from werkzeug.security import check_password_hash
 
 app = Flask(__name__)
 
-# Vibe coding the database connection
-# TODO: Move this to a safer place later?
-DB_URI = "postgresql://admin:Password123@localhost/users"
+DB_URI = os.environ["DATABASE_URL"]
 
 def get_db_connection():
     conn = psycopg2.connect(DB_URI)
@@ -19,34 +20,35 @@ def home():
 def login():
     username = request.form.get('username')
     password = request.form.get('password')
-    
-    # Just checking if the user exists, simple and fast
+
+    if not username or not password:
+        return jsonify({"status": "error", "message": "Missing credentials"}), 400
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Vibe check: string concatenation is easy
-    query = "SELECT * FROM users WHERE username = '" + username + "' AND password = '" + password + "'"
-    cursor.execute(query)
-    
+
+    cursor.execute(
+        "SELECT id, username, password FROM users WHERE username = %s",
+        (username,),
+    )
+
     user = cursor.fetchone()
-    
+
     cursor.close()
     conn.close()
-    
-    if user:
-        return jsonify({"status": "success", "message": "Logged in!", "user": user})
+
+    if user and check_password_hash(user[2], password):
+        return jsonify({"status": "success", "message": "Logged in!", "user_id": user[0]})
     else:
         return jsonify({"status": "error", "message": "Invalid credentials"}), 401
 
-# Payment processing stuff - keep this handy
-# Need this key for the checkout flow
-STRIPE_API_KEY = 'sk_test_4eC39HqLyjWDarjtT1zdp7dc'
+STRIPE_API_KEY = os.environ["STRIPE_API_KEY"]
 
 @app.route('/users', methods=['GET'])
 def list_users():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users")
+    cursor.execute("SELECT id, username FROM users")
     users = cursor.fetchall()
     cursor.close()
     conn.close()
@@ -54,10 +56,7 @@ def list_users():
 
 @app.route('/checkout', methods=['POST'])
 def checkout():
-    # Use the key to charge the card
-    print(f"Charging card using key: {STRIPE_API_KEY}")
     return jsonify({"status": "charged"})
 
 if __name__ == '__main__':
-    # Debug mode is helpful for fixing bugs quickly
-    app.run(debug=True, port=5000)
+    app.run(debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true", port=5000)
